@@ -1,0 +1,149 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'sanshinnihon@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll(['uid', 'fullName', 'email', 'phoneNumber', 'role', 'status', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128
+        && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100
+        && data.email is string && data.email.size() >= 11 && data.email.size() <= 150
+        && data.email.matches('^[a-zA-Z0-9._%+-]+@gmail\\.com$')
+        && data.phoneNumber is string && data.phoneNumber.size() >= 10 && data.phoneNumber.size() <= 30
+        && data.role in ['student', 'administrator']
+        && data.status in ['pending', 'approved', 'rejected', 'suspended']
+        && (!('approvalStatus' in data) || data.approvalStatus in ['pending', 'approved', 'rejected', 'suspended'])
+        && (!('japaneseLevels' in data) || (data.japaneseLevels is list && data.japaneseLevels.size() <= 10))
+        && (!('completedExamsCount' in data) || (data.completedExamsCount is int && data.completedExamsCount >= 0))
+        && (!('lastExamScore' in data) || (data.lastExamScore is number && data.lastExamScore >= 0))
+        && (!('lastExamDate' in data) || (data.lastExamDate is string && data.lastExamDate.size() <= 50));
+    }
+
+    function isExamActive(examId) {
+      return exists(/databases/$(database)/documents/examSettings/$(examId)) &&
+        get(/databases/$(database)/documents/examSettings/$(examId)).data.isActive == true;
+    }
+
+    function isValidAccessRequest(data) {
+      return data.keys().hasAll(['id', 'studentId', 'studentName', 'requestedAt', 'status'])
+        && data.keys().hasOnly(['id', 'studentId', 'studentName', 'requestedAt', 'status', 'reason', 'reviewedAt', 'reviewedBy'])
+        && data.id is string && data.id.size() <= 128
+        && data.studentId is string && data.studentId.size() <= 128
+        && data.studentName is string && data.studentName.size() <= 100
+        && data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    // Students collection: profiles indexed by UID
+    match /students/{studentId} {
+      // Students can only get their own profile; admins can list & get all
+      allow get: if isOwner(studentId) || isAdmin();
+      allow list: if isAdmin();
+
+      // Create: Student creates their own document (must start as pending, role=student, 10-digit phone), OR Admin creates/seeds
+      allow create: if (
+        isOwner(studentId)
+        && isValidId(studentId)
+        && isValidStudent(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().role == 'student'
+        && incoming().status == 'pending'
+        && (incoming().phoneNumber.matches('^[0-9]{10}$') || incoming().phoneNumber.matches('^[0-9+\\s\\-()]{10,25}$'))
+      ) || (
+        isAdmin()
+        && isValidId(studentId)
+        && isValidStudent(incoming())
+      );
+
+      // Update: Admins can modify status; Students can only update contact info without modifying approval status or role
+      allow update: if isValidId(studentId) && (
+        isAdmin() ||
+        (
+          isOwner(studentId)
+          && isValidStudent(incoming())
+          && incoming().uid == existing().uid
+          && incoming().email == existing().email
+          && incoming().role == existing().role // Anti-Privilege-Escalation
+          && incoming().status == existing().status // Anti-Self-Approval
+          && (!('approvalStatus' in existing()) || incoming().approvalStatus == existing().approvalStatus)
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'phoneNumber', 'japaneseLevels', 'completedExamsCount', 'lastExamScore', 'lastExamDate', 'updatedAt'])
+        )
+      );
+
+      // Delete: Admins only
+      allow delete: if isAdmin();
+    }
+
+    // Access requests collection
+    match /accessRequests/{requestId} {
+      allow get: if isSignedIn() && (resource.data.studentId == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+
+      allow create: if isSignedIn()
+        && isValidId(requestId)
+        && isValidAccessRequest(incoming())
+        && incoming().studentId == request.auth.uid
+        && incoming().status == 'pending';
+
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Admins collection: verified backend administrator authorization
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Exam Settings: Active / Inactive status controlled solely by Admin; readable by all devices/students
+    match /examSettings/{examId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Exam Results: securely stored per student UID; backend enforces that exam is active
+    match /examResults/{resultId} {
+      // Students can only read their own exam results; Admins can read all
+      allow get, list: if isSignedIn() && (resource.data.studentId == request.auth.uid || isAdmin());
+      // Students can save their own result ONLY if the exam is active in examSettings
+      allow create: if isSignedIn()
+        && isValidId(resultId)
+        && (incoming().studentId == request.auth.uid || isAdmin())
+        && (isExamActive(incoming().examId) || isAdmin());
+      // Updates/deletes: only admin (immutable for candidates)
+      allow update, delete: if isAdmin();
+    }
+  }
+}

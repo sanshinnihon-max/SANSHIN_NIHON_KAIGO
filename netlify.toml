@@ -1,0 +1,13 @@
+# Netlify Production Configuration
+# SANSHIN NIHON Caregiver Examination App
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Single Page Application (SPA) redirect rule
+# Ensures client-side routes are resolved by index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

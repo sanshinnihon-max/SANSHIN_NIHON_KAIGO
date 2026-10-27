@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "student": {
+      "title": "student",
+      "description": "Student user profile and authorization status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Auth UID" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "maxLength": 150 },
+        "phoneNumber": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["student", "administrator"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "suspended"] },
+        "approvalStatus": { "type": "string", "enum": ["pending", "approved", "rejected", "suspended"] },
+        "japaneseLevels": { "type": "array", "description": "Array of Japanese language knowledge levels" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "fullName", "email", "phoneNumber", "role", "status", "createdAt", "updatedAt"]
+    },
+    "accessRequest": {
+      "title": "accessRequest",
+      "description": "Access renewal or registration request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string", "maxLength": 100 },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "reason": { "type": "string", "maxLength": 500 },
+        "reviewedAt": { "type": "string", "format": "date-time" },
+        "reviewedBy": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "studentId", "studentName", "requestedAt", "status"]
+    },
+    "admin": {
+      "title": "admin",
+      "description": "Administrator account reference",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["administrator"] }
+      },
+      "required": ["email", "role"]
+    },
+    "examSetting": {
+      "title": "examSetting",
+      "description": "Examination activation state and settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "isActive"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": "student",
+      "description": "Student profiles indexed by user UID"
+    },
+    "/accessRequests/{requestId}": {
+      "schema": "accessRequest",
+      "description": "Access requests submitted by candidates"
+    },
+    "/admins/{adminId}": {
+      "schema": "admin",
+      "description": "Authorized administrators"
+    },
+    "/examSettings/{examId}": {
+      "schema": "examSetting",
+      "description": "Examination configuration and active status"
+    }
+  }
+}
